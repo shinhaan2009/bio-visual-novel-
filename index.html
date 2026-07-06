@@ -248,8 +248,12 @@
     }
     .affection-fill {
       height: 100%; background: var(--char-color, var(--accent));
-      width: 0%; transition: width 0.4s ease-out;
+      width: 0%; transition: width 0.4s ease-out, background 0.3s;
       box-shadow: 0 0 8px color-mix(in srgb, var(--char-color, var(--accent)) 60%, transparent);
+    }
+    .affection-container.drop .affection-fill {
+      background: #e05a6f;
+      box-shadow: 0 0 10px rgba(224, 90, 111, 0.5);
     }
 
     .chapter-tag {
@@ -1471,6 +1475,7 @@ const charGridEl = $("charGrid");
 const storyBgEl = $("storyBg");
 const storyCharEl = $("storyChar");
 const chapterTagEl = $("chapterTag");
+const affectionContainerEl = $("affectionContainer");
 const affectionValueEl = $("affectionValue");
 const affectionFillEl = $("affectionFill");
 const speakerTagEl = $("speakerTag");
@@ -1594,6 +1599,48 @@ function updateAffectionBar() {
   affectionValueEl.textContent = aff;
   const percentage = Math.min(Math.max(aff, 0), 100);
   affectionFillEl.style.width = `${percentage}%`;
+}
+
+function resolveAffectionDelta(choice, choices) {
+  if (!choice.effect || choice.effect.affection === undefined) return 0;
+
+  const delta = choice.effect.affection;
+  const values = (choices || []).map(c => c.effect?.affection ?? 0);
+  if (!values.length) return delta;
+
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+
+  // 퀴즈 오답·데이트/선물 실패 등 (기존 affection: 2)
+  if (delta === 2) return -5;
+
+  // 대화에서 가장 약한 선택지 (기존 affection: 3, 다른 선택지가 훨씬 높을 때)
+  if (delta === 3 && delta === min && max >= 6) return -2;
+
+  return delta;
+}
+
+function applyAffectionChange(delta) {
+  const current = state.affection[state.charId] || 0;
+  state.affection[state.charId] = Math.max(0, current + delta);
+  updateAffectionBar();
+
+  const sign = delta > 0 ? "+" : "";
+  showToast(`호감도 ${sign}${delta}`);
+
+  if (delta > 0) {
+    spawnHeartEffect(delta);
+    return;
+  }
+
+  if (delta < 0) {
+    affectionContainerEl.classList.add("drop");
+    storyCharEl.classList.add("shake");
+    setTimeout(() => {
+      affectionContainerEl.classList.remove("drop");
+      storyCharEl.classList.remove("shake");
+    }, 500);
+  }
 }
 
 function spawnHeartEffect(amount) {
@@ -1760,18 +1807,19 @@ function showChoices(choices) {
     btn.className = "choice-btn";
     btn.textContent = choice.text;
     btn.style.animationDelay = `${i * 0.08}s`;
-    btn.addEventListener("click", () => selectChoice(choice));
+    btn.addEventListener("click", () => selectChoice(choice, choices));
     choiceAreaEl.appendChild(btn);
   });
 
   setTimeout(() => choiceAreaEl.classList.add("visible"), 50);
 }
 
-function selectChoice(choice) {
+function selectChoice(choice, choices) {
   // Apply effects
   if (choice.effect) {
-    if (choice.effect.affection) {
-      state.affection[state.charId] = (state.affection[state.charId] || 0) + choice.effect.affection;
+    if (choice.effect.affection !== undefined) {
+      const affectionDelta = resolveAffectionDelta(choice, choices);
+      applyAffectionChange(affectionDelta);
     }
     if (choice.effect.flags) {
       Object.assign(state.flags, choice.effect.flags);
@@ -1782,16 +1830,6 @@ function selectChoice(choice) {
   choiceAreaEl.classList.remove("visible");
   choiceAreaEl.innerHTML = "";
   dialoguePanelEl.style.opacity = "1";
-
-  // Show toast for affection change
-  if (choice.effect && choice.effect.affection) {
-    const sign = choice.effect.affection > 0 ? "+" : "";
-    showToast(`호감도 ${sign}${choice.effect.affection}`);
-    updateAffectionBar();
-    if (choice.effect.affection > 0) {
-      spawnHeartEffect(choice.effect.affection);
-    }
-  }
 
   // Advance
   state.scene++;
